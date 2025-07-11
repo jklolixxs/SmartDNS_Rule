@@ -1,0 +1,100 @@
+name: "Build SmartDNS Rules Files"
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 22 * * *"
+
+permissions:
+  contents: write
+  packages: write
+  actions: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set variables
+        run: |
+          echo "BLACKMATRIX7_CHINA_DOMAINS_URL=https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/ChinaMax/ChinaMax_Domain.txt" >> $GITHUB_ENV
+          echo "BLACKMATRIX7_GLOBAL_DOMAINS_URL=https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/Global/Global_Domain.txt" >> $GITHUB_ENV
+
+          echo "BLACKMATRIX7_NETFLIX_DOMAINS_URL=https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/Netflix/Netflix.yaml" >> $GITHUB_ENV
+          echo "BLACKMATRIX7_DISNEY_DOMAINS_URL=https://raw.githubusercontent.com/blackmatrix7/ios_rule_script/master/rule/Clash/Disney/Disney.yaml" >> $GITHUB_ENV
+
+          echo "LOYALSOLDIER_CHINA_DOMAINS_URL=https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/direct-list.txt" >> $GITHUB_ENV
+          echo "LOYALSOLDIER_GLOBAL_DOMAINS_URL=https://raw.githubusercontent.com/Loyalsoldier/v2ray-rules-dat/release/proxy-list.txt" >> $GITHUB_ENV
+          echo "LOYALSOLDIER_CHINA_TLD_URL=https://raw.githubusercontent.com/Loyalsoldier/domain-list-custom/release/tld-cn.txt" >> $GITHUB_ENV
+          echo "LOYALSOLDIER_GLOBAL_TLD_URL=https://raw.githubusercontent.com/Loyalsoldier/domain-list-custom/release/tld-!cn.txt" >> $GITHUB_ENV
+
+          echo "METAGEO_URL=https://github.com/MetaCubeX/geo/releases/download/v1.0/geo-linux-amd64" >> $GITHUB_ENV
+          echo "V2FLY_GEOSITE_URL=https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat" >> $GITHUB_ENV
+        shell: bash
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rule Processing
+        run: |
+          # 1Stream
+          mkdir -p 1Stream
+          curl -s https://raw.githubusercontent.com/1-stream/1stream-public-utils/main/stream.smartdns.list | sed -e 's/nameserver \/\(.*\)\/<replace with groupname>/\1/g' > 1Stream/dnsunlock-list.conf
+
+          # Blackmatrix7
+          mkdir -p blackmatrix7/media
+          curl -s $BLACKMATRIX7_CHINA_DOMAINS_URL | sed 's/^\.//;s/^\s*//' > blackmatrix7/china-list.conf
+          curl -s $LOYALSOLDIER_CHINA_TLD_URL | sed 's/^domain://' >> blackmatrix7/china-list.conf
+          curl -s $BLACKMATRIX7_GLOBAL_DOMAINS_URL | sed 's/^\.//;s/^\s*//' > blackmatrix7/global-list.conf
+          curl -s $LOYALSOLDIER_GLOBAL_TLD_URL | sed 's/^domain://' >> blackmatrix7/global-list.conf
+          curl -s $BLACKMATRIX7_NETFLIX_DOMAINS_URL | sed -e '/payload:/d' -e 's/  - DOMAIN,//g' -e 's/  - DOMAIN-SUFFIX,//g' -e 's/  - DOMAIN-KEYWORD,//g' -e '/  - PROCESS-NAME,/d'> blackmatrix7/media/netflix-list.conf
+          curl -s $BLACKMATRIX7_DISNEY_DOMAINS_URL | sed -e '/payload:/d' -e 's/  - DOMAIN,//g' -e 's/  - DOMAIN-SUFFIX,//g' -e 's/  - DOMAIN-KEYWORD,//g' -e '/  - PROCESS-NAME,/d'> blackmatrix7/media/disney-list.conf
+
+          # Loyalsoldier
+          mkdir -p Loyalsoldier
+          curl -s $LOYALSOLDIER_CHINA_DOMAINS_URL > Loyalsoldier/china-list.conf
+          curl -s $LOYALSOLDIER_GLOBAL_DOMAINS_URL > Loyalsoldier/global-list.conf
+
+          # v2fly
+          mkdir -p v2fly/media
+          wget -O geo $METAGEO_URL
+          wget -O geosite.dat $V2FLY_GEOSITE_URL
+          chmod +x geo
+
+          ./geo unpack site geosite.dat -d output -c geolocation-cn
+          # mv output/cn output/china
+          sed -e 's/^Domain://g' -e 's/^Full://g' -e '/^Regex:/d' -e '/@ads$/d' 'output/geolocation-cn' > v2fly/china-list.conf
+          ./geo unpack site geosite.dat -d output -c tld-cn
+          # mv output/cn output/china
+          sed -e 's/^Domain://g' -e 's/^Full://g' -e '/^Regex:/d' -e '/@ads$/d' 'output/tld-cn' >> v2fly/china-list.conf
+
+          ./geo unpack site geosite.dat -d output -c geolocation-!cn
+          # mv output/geolocation-!cn output/global
+          sed -e 's/^Domain://g' -e 's/^Full://g' -e '/^Regex:/d' -e '/@ads$/d' -e '/@cn$/d' 'output/geolocation-!cn' > v2fly/global-list.conf
+          ./geo unpack site geosite.dat -d output -c tld-!cn
+          # mv output/tld-!cn output/global
+          sed -e 's/^Domain://g' -e 's/^Full://g' -e '/^Regex:/d' -e '/@ads$/d' -e '/@cn$/d' 'output/tld-!cn' >> v2fly/global-list.conf
+
+          ./geo unpack site geosite.dat -d output -c netflix
+          sed -e 's/^Domain://g' -e 's/^Full://g' -e '/^Regex:/d' -e '/@ads$/d' -e '/@cn$/d' 'output/netflix' > v2fly/media/netflix-list.conf
+          ./geo unpack site geosite.dat -d output -c disney
+          sed -e 's/^Domain://g' -e 's/^Full://g' -e '/^Regex:/d' -e '/@ads$/d' -e '/@cn$/d' 'output/disney' > v2fly/media/disney-list.conf
+          rm -rf output && rm -f geo && rm -f geosite.dat
+
+          git checkout --orphan tmp_work
+          git branch -d main
+
+      - name: Upload to repository
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          create_branch: true
+          branch: main
+          push_options: --force
+
+      - name: Delete old workflow runs
+        uses: Mattraks/delete-workflow-runs@v2
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          retain_days: 0
+          keep_minimum_runs: 0
+          delete_run_by_conclusion_pattern: "cancelled, skipped, success"
