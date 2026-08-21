@@ -1,0 +1,11 @@
+version: "3"
+
+services:
+  smartdns:
+    image: pymumu/smartdns:latest
+    container_name: smartdns
+    restart: unless-stopped
+    ports:
+      - 127.0.0.1:53:53/udp
+    volumes:
+      - ./smartdns:/etc/smartdns
